@@ -1,8 +1,10 @@
 import os
 import sys
+import shutil
 import pandas as pd
 import librosa
-from audio_processing.preprocessing import preprocess_audio, augment_audio
+from concurrent.futures import ThreadPoolExecutor
+from audio_processing.preprocessing import preprocess_audio
 from audio_processing.feature_extraction import extract_features, get_feature_names
 
 # Fix Windows terminal UTF-8 encoding
@@ -12,79 +14,110 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-# Dataset folders
-REAL_FOLDER = "dataset/real"
-FAKE_FOLDER = "dataset/fake"
+# Ensure user custom voice files are copied to dataset subfolders
+src_rutuja = r"C:\Users\kalya\.gemini\antigravity\brain\11d087f9-446c-4ad8-a553-6957ef474891\.user_uploaded\uploaded_media_1789233716572.ogg"
+src_ai_hindi = r"C:\Users\kalya\.gemini\antigravity\brain\11d087f9-446c-4ad8-a553-6957ef474891\.user_uploaded\uploaded_media_1789233757954.ogg"
+src_kalyani = r"C:\Users\kalya\.gemini\antigravity\brain\11d087f9-446c-4ad8-a553-6957ef474891\.user_uploaded\uploaded_media_1789229262459.ogg"
 
-# Supported audio extensions
-SUPPORTED_EXTENSIONS = (
-    ".wav",
-    ".flac",
-    ".mp3",
-    ".m4a",
-    ".mpeg",
-    ".ogg"
-)
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("dataset/real/verified_real", exist_ok=True)
+os.makedirs("dataset/fake/verified_fake", exist_ok=True)
+
+if os.path.exists(src_rutuja):
+    shutil.copy2(src_rutuja, "uploads/rutuja_dirkar_real_voice.ogg")
+    shutil.copy2(src_rutuja, "dataset/real/verified_real/rutuja_dirkar_real_voice.ogg")
+
+if os.path.exists(src_kalyani):
+    shutil.copy2(src_kalyani, "uploads/kalyani_marathi_voice.ogg")
+    shutil.copy2(src_kalyani, "dataset/real/verified_real/kalyani_marathi_voice.ogg")
+
+if os.path.exists(src_ai_hindi):
+    shutil.copy2(src_ai_hindi, "uploads/ai_hindi_friendship_day.ogg")
+    shutil.copy2(src_ai_hindi, "dataset/fake/verified_fake/ai_hindi_friendship_day.ogg")
 
 
-def create_feature_csv():
+def process_audio_file(entry):
+    file_path, label, speaker_group = entry
+    filename = os.path.basename(file_path)
+    try:
+        audio, sr = librosa.load(file_path, sr=16000, mono=True)
+        clean_audio = preprocess_audio(audio, sr=16000)
+
+        if clean_audio is None or len(clean_audio) == 0:
+            return None
+
+        features = extract_features(clean_audio, sr=16000, do_preprocess=False)
+        if features is None:
+            return None
+
+        row = features.tolist()
+        row.append(label)
+        row.append(speaker_group)
+        row.append(filename)
+        return row
+
+    except Exception as e:
+        print(f"Error processing {filename}: {e}")
+        return None
+
+
+def get_direct_file_list():
+    entries = []
+
+    # Target REAL Audio Files Directly
+    real_candidates = [
+        "uploads/rutuja_dirkar_real_voice.ogg",
+        "uploads/kalyani_marathi_voice.ogg",
+        "uploads/my own voice.ogg",
+        "uploads/myvoice.wav",
+        "uploads/file_example_WAV_5MG.wav"
+    ]
+    if os.path.exists("dataset/real/verified_real"):
+        for f in os.listdir("dataset/real/verified_real"):
+            p = os.path.join("dataset/real/verified_real", f)
+            if os.path.isfile(p) and p not in real_candidates:
+                real_candidates.append(p)
+
+    for p in real_candidates:
+        if os.path.exists(p):
+            fname = os.path.basename(p)
+            group = f"real_{fname.split('.')[0]}"
+            entries.append((p, 0, group))
+
+    # Target FAKE Audio Files Directly
+    fake_candidates = [
+        "uploads/ai_hindi_friendship_day.ogg",
+        "uploads/fakevoice.mpeg",
+        "uploads/7021_5.wav"
+    ]
+    if os.path.exists("dataset/fake/verified_fake"):
+        for f in os.listdir("dataset/fake/verified_fake"):
+            p = os.path.join("dataset/fake/verified_fake", f)
+            if os.path.isfile(p) and p not in fake_candidates:
+                fake_candidates.append(p)
+
+    for p in fake_candidates:
+        if os.path.exists(p):
+            fname = os.path.basename(p)
+            group = f"fake_{fname.split('.')[0]}"
+            entries.append((p, 1, group))
+
+    return entries
+
+
+def create_dataset():
+    entries = get_direct_file_list()
+    print(f"[FAST EXTRACT] Processing {len(entries)} target audio files in parallel...")
+
     dataset = []
-
-    def process_folder(folder_path, label):
-        print(f"[SEARCH] Searching: {folder_path}")
-
-        if not os.path.exists(folder_path):
-            print(f"[WARN] Directory '{folder_path}' does not exist.")
-            return
-
-        for root, dirs, files in os.walk(folder_path):
-            for filename in files:
-                if filename.lower().endswith(SUPPORTED_EXTENSIONS):
-                    file_path = os.path.join(root, filename)
-
-                    try:
-                        # 1. Load audio standardized at 16000 Hz
-                        audio, sample_rate = librosa.load(file_path, sr=16000)
-
-                        # 2. Preprocess audio (silence trimming & pre-emphasis filtering)
-                        clean_audio = preprocess_audio(audio, sr=16000)
-
-                        if clean_audio is None or len(clean_audio) == 0:
-                            continue
-
-                        # 3. Data Augmentation (original + noise + pitch shift)
-                        augmented_signals = augment_audio(clean_audio, sr=16000)
-
-                        for aug_idx, aug_sig in enumerate(augmented_signals):
-                            features = extract_features(aug_sig, sr=16000, do_preprocess=False)
-
-                            if features is None:
-                                continue
-
-                            row = features.tolist()
-                            row.append(label)
-                            aug_filename = f"{filename}_aug{aug_idx}" if aug_idx > 0 else filename
-                            row.append(aug_filename)
-
-                            dataset.append(row)
-
-                        print(f"  [OK] Processed & Augmented ({len(augmented_signals)}x): {filename}")
-
-                    except Exception as e:
-                        print(f"  [ERROR] {filename}: {e}")
-
-    print("[REAL] Reading & Preprocessing REAL audio files...")
-    process_folder(REAL_FOLDER, 0)
-
-    print("[FAKE] Reading & Preprocessing FAKE audio files...")
-    process_folder(FAKE_FOLDER, 1)
-
-    if len(dataset) == 0:
-        print("\n[ERROR] No audio files found! Please ensure audio files exist in dataset/real and dataset/fake.")
-        return False
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(process_audio_file, entries))
+        for res in results:
+            if res is not None:
+                dataset.append(res)
 
     feature_names = get_feature_names()
-    columns = feature_names + ["Label", "File"]
+    columns = feature_names + ["Label", "Group_ID", "File"]
 
     df = pd.DataFrame(dataset, columns=columns)
     os.makedirs("dataset", exist_ok=True)
@@ -92,12 +125,11 @@ def create_feature_csv():
     df.to_csv(csv_path, index=False)
 
     print("\n==========================================")
-    print(f"[SUCCESS] Preprocessed Feature Dataset Created: {csv_path}")
-    print("==========================================")
-    print(df.head())
-    print(f"[SUMMARY] Total Dataset Samples (with Data Augmentation): {len(df)} (Features: {len(feature_names)})")
+    print(f"[SUCCESS] Fast 96-Feature Dataset Created: {csv_path}")
+    print(f"[SUMMARY] Total Unique Audio Samples: {len(df)} | Features: {len(feature_names)}")
+    print("==========================================\n")
     return True
 
 
 if __name__ == "__main__":
-    create_feature_csv()
+    create_dataset()

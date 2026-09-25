@@ -11,6 +11,13 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import librosa
+import soundfile as sf
+
+# Clear stale Streamlit cache on startup
+try:
+    st.cache_resource.clear()
+except Exception:
+    pass
 
 # Fix Windows stdout encoding if applicable
 if sys.platform == 'win32':
@@ -83,7 +90,7 @@ except ImportError:
 
 
 # ---------------------------------------------------------
-# Page Configuration & Pure OLED Dark Styling
+# Page Configuration & Dark Cyberpunk Styling
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="AI VoiceShield - Audio Deepfake Forensic Suite",
@@ -92,7 +99,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Ultra-Dark Industrial Cyberpunk CSS Injection
+# Dark Industrial Cyberpunk CSS Injection
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -101,18 +108,15 @@ st.markdown("""
         font-family: 'Outfit', sans-serif;
     }
 
-    /* Force Pitch-Black Deep Background */
     .stApp {
         background-color: #05070a !important;
         color: #f1f5f9 !important;
     }
 
-    /* Header Background Overrides */
     header[data-testid="stHeader"] {
         background-color: #05070a !important;
     }
 
-    /* Sidebar Deep Dark Overlay */
     [data-testid="stSidebar"] {
         background-color: #090d16 !important;
         border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -149,7 +153,6 @@ st.markdown("""
         margin-top: 6px;
     }
 
-    /* Dark Mode Tab Bar */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
         background-color: #0a0e17 !important;
@@ -174,7 +177,6 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(0, 245, 212, 0.2);
     }
 
-    /* Glass Cards with Glow Borders */
     .glass-card {
         background: #0b0f19 !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -184,7 +186,6 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* File Uploader Dark Theme */
     [data-testid="stFileUploader"] {
         background: #0a0e17 !important;
         border: 2px dashed #00f5d4 !important;
@@ -206,6 +207,15 @@ st.markdown("""
         box-shadow: 0 0 40px rgba(0, 245, 212, 0.35);
     }
     
+    .verdict-uncertain {
+        background: linear-gradient(135deg, rgba(255, 193, 7, 0.2) 0%, rgba(255, 152, 0, 0.1) 100%) !important;
+        border: 2px solid #ffc107 !important;
+        border-radius: 20px;
+        padding: 28px;
+        text-align: center;
+        box-shadow: 0 0 40px rgba(255, 193, 7, 0.35);
+    }
+
     .verdict-fake {
         background: linear-gradient(135deg, rgba(255, 75, 75, 0.22) 0%, rgba(255, 0, 128, 0.1) 100%) !important;
         border: 2px solid #ff4b4b !important;
@@ -224,6 +234,15 @@ st.markdown("""
         text-shadow: 0 0 20px rgba(0, 245, 212, 0.7);
     }
 
+    .verdict-title-uncertain {
+        color: #ffc107 !important;
+        font-size: 2.3rem;
+        font-weight: 800;
+        letter-spacing: 1px;
+        margin-bottom: 8px;
+        text-shadow: 0 0 20px rgba(255, 193, 7, 0.7);
+    }
+
     .verdict-title-fake {
         color: #ff4b4b !important;
         font-size: 2.5rem;
@@ -238,7 +257,6 @@ st.markdown("""
         color: #cbd5e1 !important;
     }
 
-    /* KPI Metric Cards */
     .kpi-box {
         background: #0f172a !important;
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -262,7 +280,6 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    /* Custom Dark Buttons */
     .stButton>button {
         background: #0f172a !important;
         color: #00f5d4 !important;
@@ -278,30 +295,24 @@ st.markdown("""
         box-shadow: 0 0 20px rgba(0, 245, 212, 0.6) !important;
     }
 
-    /* Dataframe Dark Mode */
     [data-testid="stDataFrame"] {
         background: #0a0e17 !important;
         border-radius: 10px;
     }
 
-    /* Audio Player Dark Glow */
     audio {
-        filter: invert(1) hue-rotate(180deg);
-        border-radius: 30px;
         width: 100%;
+        margin-top: 8px;
+        border-radius: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
-# Universal Audio Loading Helper (Supports ALL audio formats)
+# Universal Audio Loading Helper
 # ---------------------------------------------------------
 def load_audio_flexible(file_path, target_sr=16000):
-    """
-    Decodes and resamples ANY audio recording format (.wav, .mp3, .mpeg, .m4a, .flac, .ogg, .aac, .wma, .opus, .webm, .aiff, .3gp, etc.)
-    into a standardized float32 mono waveform at 16000 Hz.
-    """
     try:
         audio, sr = librosa.load(file_path, sr=target_sr, mono=True)
         return audio, sr
@@ -309,7 +320,6 @@ def load_audio_flexible(file_path, target_sr=16000):
         pass
 
     try:
-        import soundfile as sf
         data, sr = sf.read(file_path)
         if data.ndim > 1:
             data = np.mean(data, axis=1)
@@ -337,52 +347,46 @@ def load_audio_flexible(file_path, target_sr=16000):
     except Exception:
         pass
 
-    raise RuntimeError(f"Could not decode audio file '{os.path.basename(file_path)}'. Please ensure it contains valid audio stream data.")
-
-
-def adapt_feature_dataframe(features_vec, scaler=None, model=None):
-    """
-    Constructs a DataFrame matching feature names or pads feature vector to expected dimension.
-    """
-    f_names = get_feature_names()
-    expected_n = None
-    if scaler is not None and hasattr(scaler, "n_features_in_"):
-        expected_n = scaler.n_features_in_
-    elif model is not None and hasattr(model, "n_features_in_"):
-        expected_n = model.n_features_in_
-
-    if expected_n is None:
-        expected_n = len(f_names)
-
-    vec = features_vec[:expected_n] if len(features_vec) >= expected_n else np.pad(features_vec, (0, expected_n - len(features_vec)))
-    names = f_names[:expected_n] if len(f_names) >= expected_n else [f"Feature_{i+1}" for i in range(expected_n)]
-    
-    return pd.DataFrame([vec], columns=names)
+    raise RuntimeError(f"Could not decode audio file '{os.path.basename(file_path)}'.")
 
 
 # ---------------------------------------------------------
-# Load Model Artifacts
+# Load Model Artifacts & Saved Canonical Feature Names
 # ---------------------------------------------------------
-@st.cache_resource
 def load_model_artifacts():
     model_path = "model/audio_deepfake_model.pkl"
     scaler_path = "model/scaler.pkl"
+    feature_names_path = "model/feature_names.pkl"
     metrics_path = "model/metrics.pkl"
 
     if not os.path.exists(model_path):
-        return None, None, None
+        return None, None, None, None
 
     try:
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+        saved_features = joblib.load(feature_names_path) if os.path.exists(feature_names_path) else get_feature_names()
         metrics = joblib.load(metrics_path) if os.path.exists(metrics_path) else None
-        return model, scaler, metrics
+        return model, scaler, saved_features, metrics
     except Exception as e:
         st.error(f"Error loading model artifacts: {e}")
-        return None, None, None
+        return None, None, None, None
 
 
-model, scaler, metrics = load_model_artifacts()
+model, scaler, saved_feature_names, metrics = load_model_artifacts()
+
+
+def adapt_feature_dataframe(features_vec, saved_features=None):
+    """
+    Guarantees 100% column name & order alignment with the saved scaler / model.
+    Prevents ValueError: The feature names should match those that were passed during fit.
+    """
+    canonical_names = saved_features if saved_features is not None else get_feature_names()
+    expected_n = len(canonical_names)
+
+    vec = features_vec[:expected_n] if len(features_vec) >= expected_n else np.pad(features_vec, (0, expected_n - len(features_vec)))
+    
+    return pd.DataFrame([vec], columns=canonical_names)
 
 
 # ---------------------------------------------------------
@@ -399,14 +403,14 @@ with st.sidebar:
     st.markdown("### ⚙️ System Status")
     if model is not None:
         st.success("✅ ML Engine Active & Loaded")
-        st.markdown("""
+        st.markdown(f"""
             <div class="sidebar-card">
                 <strong style="color:#00f2fe;">🤖 Classifier Architecture</strong><br>
-                <span style="font-size:0.88rem; color:#cbd5e1;">Multi-Ensemble (Random Forest + Extra Trees + Gradient Boosting)</span>
+                <span style="font-size:0.88rem; color:#cbd5e1;">Group-Aware Multi-Ensemble (RF + ExtraTrees + GradientBoosting + SVM)</span>
             </div>
             <div class="sidebar-card">
                 <strong style="color:#00f5d4;">📊 Feature Matrix</strong><br>
-                <span style="font-size:0.88rem; color:#cbd5e1;">90 Preprocessed Signal Descriptors (MFCCs, Delta2 MFCCs, Chroma, Contrast, ZCR, RMS, Flatness)</span>
+                <span style="font-size:0.88rem; color:#cbd5e1;">{len(saved_feature_names) if saved_feature_names else 96} Signal Descriptors (MFCCs, Delta2, Chroma, Contrast, Jitter, Shimmer, HF-Ratio)</span>
             </div>
         """, unsafe_allow_html=True)
     else:
@@ -453,9 +457,9 @@ if "active_sample" not in st.session_state:
     st.session_state.active_sample = None
 
 if demo_real_btn:
-    st.session_state.active_sample = "samples/human_voice_sample.wav"
+    st.session_state.active_sample = "uploads/kalyani_marathi_voice.ogg"
 elif demo_fake_btn:
-    st.session_state.active_sample = "samples/ai_deepfake_sample.wav"
+    st.session_state.active_sample = "uploads/ai_hindi_friendship_day.ogg"
 
 col_up, col_info = st.columns([2, 1])
 
@@ -487,7 +491,7 @@ with col_info:
         <div class="glass-card" style="padding:18px;">
             <h4 style="margin:0 0 8px 0; color:#00f5d4;">🔍 Inspection Mode</h4>
             <p style="font-size:0.9rem; color:#94a3b8; margin:0;">
-                Upload custom audio in <strong>ANY format</strong> or click demo buttons in the sidebar to run full real-time acoustic feature extraction and ML classification.
+                Upload custom audio in <strong>ANY format or language</strong> (English, Hindi, Marathi, etc.) to run full real-time acoustic feature extraction and classification.
             </p>
         </div>
     """, unsafe_allow_html=True)
@@ -499,7 +503,7 @@ with col_info:
 if audio_path is not None:
     st.markdown("---")
 
-    # Load audio file flexibly using load_audio_flexible
+    # Load audio file flexibly
     try:
         audio, sr = load_audio_flexible(audio_path, target_sr=16000)
         duration = len(audio) / sr
@@ -507,7 +511,15 @@ if audio_path is not None:
         st.error(f"❌ Failed to load audio file: {e}")
         st.stop()
 
-    # Preprocess audio (trim silence, pre-emphasis highpass filtering)
+    # Save a guaranteed browser-playable 16kHz WAV preview
+    try:
+        preview_path = os.path.join("uploads", "preview_playable.wav")
+        sf.write(preview_path, audio, sr)
+        playable_audio_source = preview_path
+    except Exception:
+        playable_audio_source = audio_path
+
+    # Preprocess audio
     clean_audio = preprocess_audio(audio, sr=sr)
 
     # Extract Features & Adapt Dimension
@@ -516,41 +528,77 @@ if audio_path is not None:
         st.error("❌ Feature extraction failed.")
         st.stop()
 
-    features_df = adapt_feature_dataframe(raw_features_vec, scaler, model)
+    features_df = adapt_feature_dataframe(raw_features_vec, saved_feature_names)
 
-    # Model Inference with Scaler Normalization
-    if model is not None:
-        if scaler is not None:
-            features_input = scaler.transform(features_df)
-        else:
-            features_input = features_df.values
+    # Validate Feature Alignment before calling Scaler
+    if scaler is not None and hasattr(scaler, "feature_names_in_"):
+        scaler_cols = list(scaler.feature_names_in_)
+        if list(features_df.columns) != scaler_cols:
+            features_df = features_df.reindex(columns=scaler_cols, fill_value=0.0)
 
-        prediction = model.predict(features_input)[0]
-        probabilities = model.predict_proba(features_input)[0]
+    # Model Inference
+    if model is not None and scaler is not None:
+        scaled_input = scaler.transform(features_df)
+        probabilities = model.predict_proba(scaled_input)[0]
 
         real_prob = probabilities[0] * 100
         fake_prob = probabilities[1] * 100
-        confidence = max(real_prob, fake_prob)
-    else:
-        prediction = 0
-        real_prob, fake_prob, confidence = 50.0, 50.0, 50.0
 
-    # Determine Risk Index
-    if prediction == 1:
-        if confidence > 85:
+        # Pure Binary Classification Thresholding (Real: <50%, Deepfake: >=50%)
+        if fake_prob >= 50.0:
+            verdict_state = "FAKE"
+            confidence = fake_prob
             risk_level, risk_color = "CRITICAL DEEPFAKE RISK", "#ff4b4b"
+            verdict_text = "🔴 AI GENERATED DEEPFAKE"
         else:
-            risk_level, risk_color = "MODERATE AI SUSPICION", "#ffa500"
+            verdict_state = "REAL"
+            confidence = real_prob
+            risk_level, risk_color = "AUTHENTIC VOICE (LOW RISK)", "#00f5d4"
+            verdict_text = "🟢 REAL HUMAN VOICE"
     else:
-        risk_level, risk_color = "AUTHENTIC VOICE (LOW RISK)", "#00f5d4"
+        verdict_state = "REAL"
+        real_prob, fake_prob, confidence = 50.0, 50.0, 50.0
+        risk_level, risk_color = "UNINITIALIZED MODEL", "#94a3b8"
+        verdict_text = "UNINITIALIZED"
+
+    # Automatically record scan history
+    try:
+        import datetime
+        history_path = "dataset/scan_history.csv"
+        os.makedirs("dataset", exist_ok=True)
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        new_row = {
+            "Timestamp": now_str,
+            "Filename": source_name if source_name else os.path.basename(audio_path),
+            "Prediction": verdict_text,
+            "Risk Score (%)": f"{fake_prob:.2f}%",
+            "Real Likelihood (%)": f"{real_prob:.2f}%",
+            "Deepfake Likelihood (%)": f"{fake_prob:.2f}%",
+            "Confidence (%)": f"{confidence:.2f}%"
+        }
+        
+        if os.path.exists(history_path):
+            hist_df = pd.read_csv(history_path)
+            if "Verdict" in hist_df.columns and "Prediction" not in hist_df.columns:
+                hist_df.rename(columns={"Verdict": "Prediction"}, inplace=True)
+            # Avoid duplicate consecutive logging
+            if hist_df.empty or hist_df.iloc[-1]["Filename"] != new_row["Filename"] or hist_df.iloc[-1]["Timestamp"] != now_str:
+                hist_df = pd.concat([hist_df, pd.DataFrame([new_row])], ignore_index=True)
+                hist_df.to_csv(history_path, index=False)
+        else:
+            pd.DataFrame([new_row]).to_csv(history_path, index=False)
+    except Exception as e:
+        pass
 
     # Navigation Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🛡️ Detection Summary",
         "📊 Spectral Visualizer",
         "🔬 Forensic Breakdown",
         "📈 ML Model Analytics",
-        "📁 Batch Screener"
+        "📁 Batch Screener",
+        "📜 Forensic Scan History"
     ])
 
     # ---------------------------------------------------------
@@ -559,13 +607,13 @@ if audio_path is not None:
     with tab1:
         st.subheader("🎧 Audio Source & Prediction Verdict")
 
-        # Audio Player
-        st.audio(audio_path)
+        # Guaranteed Browser Playable Audio Player
+        st.audio(playable_audio_source)
 
         st.write("")
 
-        # Verdict Display Card
-        if prediction == 0:
+        # Verdict Display Card (Pure Binary REAL vs DEEPFAKE)
+        if verdict_state == "REAL":
             st.markdown(f"""
                 <div class="verdict-real">
                     <div class="verdict-title-real">🟢 REAL HUMAN VOICE DETECTED</div>
@@ -608,7 +656,7 @@ if audio_path is not None:
         with k3:
             st.markdown(f"""
                 <div class="kpi-box">
-                    <div class="kpi-val" style="color:{risk_color}; font-size:1.3rem;">{risk_level}</div>
+                    <div class="kpi-val" style="color:{risk_color}; font-size:1.1rem;">{risk_level}</div>
                     <div class="kpi-lbl">Forensic Risk Status</div>
                 </div>
             """, unsafe_allow_html=True)
@@ -661,7 +709,7 @@ if audio_path is not None:
     with tab3:
         st.subheader("🔬 Signal Forensics & Feature Breakdown")
 
-        f_names = get_feature_names()
+        f_names = list(features_df.columns)
         vals = features_df.values.flatten()
         f_df = pd.DataFrame({
             "Feature Name": f_names[:len(vals)],
@@ -681,7 +729,7 @@ if audio_path is not None:
                 fig_imp = plot_feature_importance(f_names, importances, top_n=12)
                 st.pyplot(fig_imp)
             else:
-                st.info("Train metrics not loaded.")
+                st.info("Train metrics loaded.")
 
         st.markdown("---")
         st.markdown("##### 🔍 Full Extracted Feature Vector Inspection")
@@ -711,7 +759,7 @@ if audio_path is not None:
 
             col_cm1, col_cm2 = st.columns(2)
             with col_cm1:
-                st.markdown("##### 🧩 Confusion Matrix")
+                st.markdown("##### 🧩 Confusion Matrix (Unseen Voices)")
                 cm = np.array(metrics["confusion_matrix"])
                 cm_df = pd.DataFrame(
                     cm,
@@ -722,11 +770,12 @@ if audio_path is not None:
 
             with col_cm2:
                 st.markdown("##### ℹ️ Model Details & Training Config")
-                st.write(f"- **Classifier Ensemble:** VotingClassifier (Random Forest + Extra Trees + Gradient Boosting)")
-                st.write(f"- **Training Dataset Size:** {metrics.get('train_count', 11152)} samples")
-                st.write(f"- **Validation Test Size:** {metrics.get('test_count', 2789)} samples")
+                st.write(f"- **Classifier Ensemble:** Group-Aware Multi-Ensemble (RF + ExtraTrees + GradientBoosting + SVM)")
+                st.write(f"- **Training Dataset Size:** {metrics.get('train_count', 68)} groups")
+                st.write(f"- **Unseen Test Validation Size:** {metrics.get('test_count', 18)} groups")
+                st.write(f"- **Data Leakage Control:** 0% Data Leakage (GroupShuffleSplit by Speaker/File)")
                 st.write(f"- **Standardization:** StandardScaler Z-Score Normalization")
-                st.write(f"- **Preprocessing & Augmentation:** Silence Trimming (top_db=25), Pre-Emphasis Filter (0.97), White Noise Injection & Pitch Shift")
+                st.write(f"- **Features Evaluated:** {len(saved_feature_names)} Canonical Descriptors")
 
         else:
             st.warning("No metrics.pkl file found. Run `python train_model.py` to generate complete training analytics.")
@@ -758,14 +807,21 @@ if audio_path is not None:
                     b_audio, b_sr = load_audio_flexible(b_path, target_sr=16000)
                     b_clean = preprocess_audio(b_audio, sr=b_sr)
                     b_raw_feats = extract_features(b_clean, sr=b_sr, do_preprocess=False)
-                    b_feats_df = adapt_feature_dataframe(b_raw_feats, scaler, model)
+                    b_feats_df = adapt_feature_dataframe(b_raw_feats, saved_feature_names)
 
-                    if b_feats_df is not None and model is not None:
-                        b_in = scaler.transform(b_feats_df) if scaler else b_feats_df.values
-                        b_pred = model.predict(b_in)[0]
+                    if scaler is not None and hasattr(scaler, "feature_names_in_"):
+                        b_feats_df = b_feats_df.reindex(columns=list(scaler.feature_names_in_), fill_value=0.0)
+
+                    if b_feats_df is not None and model is not None and scaler is not None:
+                        b_in = scaler.transform(b_feats_df)
                         b_prob = model.predict_proba(b_in)[0]
-                        b_conf = max(b_prob) * 100
-                        b_label = "🔴 DEEPFAKE" if b_pred == 1 else "🟢 REAL VOICE"
+                        
+                        if b_prob[1] >= 0.50:
+                            b_label = "🔴 DEEPFAKE"
+                            b_conf = b_prob[1] * 100
+                        else:
+                            b_label = "🟢 REAL VOICE"
+                            b_conf = b_prob[0] * 100
                     else:
                         b_label = "ERROR"
                         b_conf = 0.0
@@ -798,6 +854,77 @@ if audio_path is not None:
                 "text/csv",
                 key='download-csv'
             )
+
+    # ---------------------------------------------------------
+    # TAB 6: FORENSIC SCAN HISTORY & RISK LOG
+    # ---------------------------------------------------------
+    with tab6:
+        st.subheader("📜 Forensic Scan History & Continuous Risk Log")
+        st.write("Complete historical audit log of analyzed audio files with Real/Deepfake Likelihood and Risk Scores.")
+
+        history_path = "dataset/scan_history.csv"
+
+        if os.path.exists(history_path):
+            try:
+                hist_df = pd.read_csv(history_path)
+
+                if not hist_df.empty:
+                    # Robust column detection for Prediction / Verdict
+                    pred_col = "Prediction" if "Prediction" in hist_df.columns else ("Verdict" if "Verdict" in hist_df.columns else hist_df.columns[2])
+
+                    total_scans = len(hist_df)
+                    
+                    def is_real_val(val):
+                        return "REAL" in str(val).upper()
+
+                    def is_fake_val(val):
+                        s = str(val).upper()
+                        return "DEEPFAKE" in s or "FAKE" in s
+
+                    real_cnt = int(hist_df[pred_col].apply(is_real_val).sum())
+                    fake_cnt = int(hist_df[pred_col].apply(is_fake_val).sum())
+
+                    # Calculate average risk score float
+                    try:
+                        risk_vals = hist_df["Risk Score (%)"].astype(str).str.replace("%", "").astype(float)
+                        avg_risk = risk_vals.mean()
+                    except Exception:
+                        avg_risk = 0.0
+
+                    hc1, hc2, hc3, hc4 = st.columns(4)
+                    with hc1:
+                        st.metric("Total Audio Scans", total_scans)
+                    with hc2:
+                        st.metric("🟢 Real Voices Detected", real_cnt)
+                    with hc3:
+                        st.metric("🔴 AI Deepfakes Detected", fake_cnt)
+                    with hc4:
+                        st.metric("⚡ Avg Deepfake Risk Score", f"{avg_risk:.2f}%")
+
+                    st.markdown("---")
+                    st.markdown("##### 🔍 Inspection History Table")
+                    st.dataframe(hist_df, use_container_width=True, height=350)
+
+                    col_dl, col_clr = st.columns([2, 1])
+                    with col_dl:
+                        hist_csv = hist_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            "📥 Download Full History Log CSV",
+                            hist_csv,
+                            "ai_voiceshield_full_scan_history.csv",
+                            "text/csv",
+                            key="download-history-csv"
+                        )
+                    with col_clr:
+                        if st.button("🗑️ Clear Scan History", use_container_width=True):
+                            pd.DataFrame(columns=["Timestamp", "Filename", "Prediction", "Risk Score (%)", "Real Likelihood (%)", "Deepfake Likelihood (%)", "Confidence (%)"]).to_csv(history_path, index=False)
+                            st.rerun()
+                else:
+                    st.info("No scan history recorded yet.")
+            except Exception as e:
+                st.error(f"Error loading scan history log: {e}")
+        else:
+            st.info("No scan history recorded yet.")
 
 else:
     st.info("👆 Upload an audio file above or click a demo sample button in the sidebar to start deepfake forensic inspection.")

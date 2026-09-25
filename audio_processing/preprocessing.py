@@ -1,14 +1,15 @@
 import numpy as np
 import librosa
+from scipy.signal import butter, lfilter
 
 
 def preprocess_audio(audio, sr=16000, top_db=25, pre_emphasis=0.97):
     """
-    Standard Audio Preprocessing Pipeline matching Digital Signal Processing standards:
-    1. Trims leading and trailing silent sections (silence removal).
-    2. Applies pre-emphasis high-frequency filter: y(t) = x(t) - alpha * x(t-1).
-    3. Normalizes waveform amplitude.
-    4. Pads short audio segments to ensure minimum length (>0.2s).
+    Standardized Audio Preprocessing Pipeline:
+    1. Amplitude normalization.
+    2. Silence trimming (top_db threshold).
+    3. Pre-emphasis highpass filtering: y(t) = x(t) - 0.97 * x(t-1).
+    4. Minimum duration padding (>0.25s).
     """
     try:
         if audio is None or len(audio) == 0:
@@ -17,17 +18,17 @@ def preprocess_audio(audio, sr=16000, top_db=25, pre_emphasis=0.97):
         # 1. Amplitude Normalization
         audio = librosa.util.normalize(audio)
 
-        # 2. Silence Trimming (removes silent leading/trailing frames)
+        # 2. Silence Trimming
         trimmed_audio, _ = librosa.effects.trim(audio, top_db=top_db)
-        if len(trimmed_audio) > int(sr * 0.2):
+        if len(trimmed_audio) >= int(sr * 0.25):
             audio = trimmed_audio
 
-        # 3. Pre-Emphasis Filtering (emphasizes high frequency vocal Formants & Vocoder artifacts)
-        if pre_emphasis > 0:
+        # 3. Pre-Emphasis Highpass Filter
+        if pre_emphasis > 0 and len(audio) > 1:
             audio = np.append(audio[0], audio[1:] - pre_emphasis * audio[:-1])
 
-        # 4. Minimum Duration Padding
-        min_samples = int(sr * 0.2)
+        # 4. Minimum Duration Padding (at least 0.25s)
+        min_samples = int(sr * 0.25)
         if len(audio) < min_samples:
             audio = np.pad(audio, (0, min_samples - len(audio)), mode='constant')
 
@@ -42,29 +43,39 @@ def preprocess_audio(audio, sr=16000, top_db=25, pre_emphasis=0.97):
 
 def augment_audio(audio, sr=16000):
     """
-    Data Augmentation Pipeline to make ML Model robust against real-world voice recording noise,
-    mobile microphone compression, and pitch inflections:
-    1. Adds subtle Gaussian white noise (SNR ~ 30dB).
-    2. Applies pitch shift (-1 to +1 semitones).
-    3. Applies slight speed time stretch (0.95x - 1.05x).
+    Realistic Audio Augmentation (Used ONLY on Training Set to prevent leakage):
+    1. Clean original signal.
+    2. Subtle ambient Gaussian noise floor (SNR ~30dB).
+    3. Mobile telephone/mic bandpass filter (300Hz - 7000Hz).
+    4. Micro pitch shift (+1.0 semitones).
     """
     augmented = []
     if audio is None or len(audio) == 0:
         return augmented
 
-    # Original preprocessed signal
+    # Original signal
     augmented.append(audio)
 
     try:
-        # Augmentation 1: Subtle Ambient Noise Floor
+        # Augmentation 1: Subtle Noise Floor
         noise = np.random.normal(0, 0.005, len(audio))
-        noisy_audio = librosa.util.normalize(audio + noise)
-        augmented.append(noisy_audio.astype(np.float32))
+        noisy = librosa.util.normalize(audio + noise)
+        augmented.append(noisy.astype(np.float32))
     except Exception:
         pass
 
     try:
-        # Augmentation 2: Pitch Shift (Micro pitch inflection)
+        # Augmentation 2: Mobile Mic Bandpass Filter (300Hz - 7000Hz)
+        lowcut, highcut = 300, 7000
+        nyq = 0.5 * sr
+        b, a = butter(2, [lowcut / nyq, highcut / nyq], btype='band')
+        filtered = lfilter(b, a, audio)
+        augmented.append(librosa.util.normalize(filtered).astype(np.float32))
+    except Exception:
+        pass
+
+    try:
+        # Augmentation 3: Micro Pitch Shift
         shifted = librosa.effects.pitch_shift(audio, sr=sr, n_steps=1.0)
         augmented.append(librosa.util.normalize(shifted).astype(np.float32))
     except Exception:
